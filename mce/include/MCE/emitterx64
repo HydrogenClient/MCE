@@ -1,0 +1,98 @@
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║  MCE – Machine Code Emitter for x86-64                                  ║
+// ║  Version 1.0  –  MIT Licence                                            ║
+// ║                                                                          ║
+// ║  Single include:                                                         ║
+// ║    #include <MCE/emitterx64>                                             ║
+// ║                                                                          ║
+// ║  Quick-start (raw emitter):                                              ║
+// ║    using namespace mce;                                                  ║
+// ║    EmitterX64 e;                                                         ║
+// ║    e.push(Reg64::RBP);                                                   ║
+// ║    e.mov(Reg64::RBP, Reg64::RSP);                                        ║
+// ║    e.mov(Reg64::RAX, (i64)42);                                           ║
+// ║    e.epilog();               // mov rsp,rbp  pop rbp  ret               ║
+// ║    e.emit("out.exe");        // write Windows PE64 executable            ║
+// ║                                                                          ║
+// ║  Quick-start (global CodeBuffer):                                        ║
+// ║    emitter.import("kernel32.dll","ExitProcess");                         ║
+// ║    emitter.text().mov(Reg64::RCX,(i64)0);                               ║
+// ║    // ... emit IAT call via IATHelper ...                                ║
+// ║    emitter.emit("out.exe", entry_offset);                                ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
+#pragma once
+
+// Standard headers required by detail headers
+#include <cstdint>
+#include <cstddef>
+#include <cstring>
+#include <vector>
+#include <string>
+#include <stdexcept>
+#include <unordered_map>
+#include <functional>
+#include <cassert>
+#include <fstream>
+#include <ctime>
+
+// ─── Core headers (include order matters) ────────────────────────────────────
+#include "detail/types.hpp"
+#include "detail/encoding.hpp"
+#include "detail/pe_writer.hpp"
+#include "detail/emitter_core.hpp"
+#include "detail/function_builder.hpp"
+#include "detail/code_buffer.hpp"
+#include "detail/iat_helper.hpp"
+
+// On Windows: pull in VirtualAlloc/Free for the optional JIT runner
+#if defined(_WIN32)
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
+#endif
+
+// ─── Convenience register aliases ────────────────────────────────────────────
+namespace mce {
+namespace reg {
+    // ── 64-bit ──────────────────────────────────────────────────────────
+    constexpr Reg64 rax = Reg64::RAX; constexpr Reg64 rcx = Reg64::RCX;
+    constexpr Reg64 rdx = Reg64::RDX; constexpr Reg64 rbx = Reg64::RBX;
+    constexpr Reg64 rsp = Reg64::RSP; constexpr Reg64 rbp = Reg64::RBP;
+    constexpr Reg64 rsi = Reg64::RSI; constexpr Reg64 rdi = Reg64::RDI;
+    constexpr Reg64 r8  = Reg64::R8;  constexpr Reg64 r9  = Reg64::R9;
+    constexpr Reg64 r10 = Reg64::R10; constexpr Reg64 r11 = Reg64::R11;
+    constexpr Reg64 r12 = Reg64::R12; constexpr Reg64 r13 = Reg64::R13;
+    constexpr Reg64 r14 = Reg64::R14; constexpr Reg64 r15 = Reg64::R15;
+    // ── 32-bit ──────────────────────────────────────────────────────────
+    constexpr Reg32 eax = Reg32::EAX; constexpr Reg32 ecx = Reg32::ECX;
+    constexpr Reg32 edx = Reg32::EDX; constexpr Reg32 ebx = Reg32::EBX;
+    constexpr Reg32 esp = Reg32::ESP; constexpr Reg32 ebp = Reg32::EBP;
+    constexpr Reg32 esi = Reg32::ESI; constexpr Reg32 edi = Reg32::EDI;
+    constexpr Reg32 r8d = Reg32::R8D; constexpr Reg32 r9d = Reg32::R9D;
+    // ── 16-bit ──────────────────────────────────────────────────────────
+    constexpr Reg16 ax  = Reg16::AX;  constexpr Reg16 cx  = Reg16::CX;
+    constexpr Reg16 dx  = Reg16::DX;  constexpr Reg16 bx  = Reg16::BX;
+    constexpr Reg16 sp  = Reg16::SP;  constexpr Reg16 bp  = Reg16::BP;
+    constexpr Reg16 si  = Reg16::SI;  constexpr Reg16 di  = Reg16::DI;
+    // ── 8-bit ───────────────────────────────────────────────────────────
+    constexpr Reg8  al  = Reg8::AL;   constexpr Reg8  cl  = Reg8::CL;
+    constexpr Reg8  dl  = Reg8::DL;   constexpr Reg8  bl  = Reg8::BL;
+    constexpr Reg8  ah  = Reg8::AH;   constexpr Reg8  ch  = Reg8::CH;
+    constexpr Reg8  dh  = Reg8::DH;   constexpr Reg8  bh  = Reg8::BH;
+    // ── XMM ─────────────────────────────────────────────────────────────
+    constexpr RegXMM xmm0 = RegXMM::XMM0; constexpr RegXMM xmm1 = RegXMM::XMM1;
+    constexpr RegXMM xmm2 = RegXMM::XMM2; constexpr RegXMM xmm3 = RegXMM::XMM3;
+    constexpr RegXMM xmm4 = RegXMM::XMM4; constexpr RegXMM xmm5 = RegXMM::XMM5;
+    constexpr RegXMM xmm6 = RegXMM::XMM6; constexpr RegXMM xmm7 = RegXMM::XMM7;
+} // namespace reg
+
+// ─── Windows x64 ABI: integer argument registers in call order ───────────────
+constexpr Reg64 win64_args[4] = {
+    Reg64::RCX, Reg64::RDX, Reg64::R8, Reg64::R9
+};
+
+} // namespace mce

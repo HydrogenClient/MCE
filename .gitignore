@@ -1,0 +1,16 @@
+# Build artifacts
+build/
+bin/
+*.exe
+*.pdb
+
+# CMake temp files
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+Makefile
+
+# VS/Local settings
+.vs/
+out/
