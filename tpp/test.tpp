@@ -1,14 +1,6 @@
+#include <io.h>
+
 int main() {
-    print_str("Starting T++ counting demo...\n");
-    int i = 1;
-    int sum = 0;
-    while (i < 11) {
-        print_str("Current: ");
-        print_int(i);
-        sum = sum + i;
-        y = i + 1;
-    }
-    print_str("Total Sum: ");
-    print_int(sum);
+    print_str("This should fail because io.h is not included.\n");
     return 0;
 }

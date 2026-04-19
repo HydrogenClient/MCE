@@ -1,8 +1,17 @@
 #include "codegen.hpp"
 #include "errors.hpp"
+#include "preprocessor.hpp"
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <windows.h>
+
+std::string get_executable_dir() {
+    char buffer[MAX_PATH];
+    GetModuleFileNameA(NULL, buffer, MAX_PATH);
+    std::string path(buffer);
+    return path.substr(0, path.find_last_of("\\/"));
+}
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -29,6 +38,26 @@ int main(int argc, char** argv) {
     ss << f.rdbuf();
     std::string source = ss.str();
 
+    // 1. Preprocess
+    std::string exe_dir = get_executable_dir();
+    std::string inc_path = "tpp/includes"; // default
+    
+    // Check common locations
+    std::vector<std::string> search_paths = {
+        exe_dir + "\\includes",               // next to exe
+        exe_dir + "\\..\\..\\tpp\\includes",   // from build/tpp
+        "tpp/includes",                        // from root
+        "..\\tpp\\includes"                    // from build
+    };
+    
+    for (const auto& p : search_paths) {
+        std::ifstream test(p + "\\io.h");
+        if (test) { inc_path = p; break; }
+    }
+
+    source = tpp::Preprocessor::process(source, inc_path);
+
+    // 2. Init Error Reporter
     tpp::ErrorReporter::init(source, input_file);
 
     try {

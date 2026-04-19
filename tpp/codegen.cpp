@@ -1,6 +1,7 @@
 #include "codegen.hpp"
 #include "errors.hpp"
 #include <stdexcept>
+#include <set>
 
 namespace tpp {
 
@@ -13,6 +14,12 @@ std::vector<unsigned char> Codegen::compile(unsigned int& entry_offset) {
         .import("kernel32.dll", "ExitProcess");
 
     iat_ = new mce::IATHelper(emitter_, peb_);
+
+    std::set<std::string> declared_functions;
+    for (auto& fn : program_) {
+        declared_functions.insert(fn->name);
+    }
+    declared_functions_ = declared_functions; // store for gen_expr
 
     for (auto& fn : program_) {
         if (!fn->is_extern) {
@@ -160,51 +167,61 @@ void Codegen::gen_expr(const Expr& expr) {
         }
     }
     else if (auto e = dynamic_cast<const CallExpr*>(&expr)) {
-        if (e->callee == "print_int") {
-            gen_expr(*e->args[0]); 
-            emitter_.push(rax); 
-            emitter_.mov(rcx, (i64)-11); 
-            iat_->call("kernel32.dll", "GetStdHandle");
-            emitter_.mov(rbx, rax); 
-            emitter_.pop(rax); 
-            emitter_.lea(rsi, mce::qword_ptr(rsp, 64)); 
-            emitter_.mov(byte_ptr(rsi, 15), (u8)'\n');
-            emitter_.mov(byte_ptr(rsi, 14), (u8)'\r');
-            emitter_.mov(rdi, (i64)13);
-            auto lp = emitter_.make_label();
-            emitter_.bind(lp);
-            emitter_.xor_(edx, edx); emitter_.mov(r10, (i64)10); emitter_.idiv(r10);
-            emitter_.add(dl, (u8)'0'); emitter_.mov(mce::byte_ptr(rsi, rdi, mce::Scale::x1), dl);
-            emitter_.dec(rdi);
-            emitter_.test(rax, rax);
-            emitter_.jnz(lp);
-            emitter_.inc(rdi);
-            emitter_.mov(rcx, rbx);
-            emitter_.lea(rdx, mce::qword_ptr(rsi, rdi, mce::Scale::x1));
-            emitter_.mov(r8, (i64)16); emitter_.sub(r8, rdi);
-            emitter_.lea(r9, mce::qword_ptr(rsp, 100)); 
-            emitter_.mov(mce::qword_ptr(rsp, 32), (i32)0);
-            iat_->call("kernel32.dll", "WriteFile");
-            emitter_.mov(rax, (i64)0);
-        }
-        else if (e->callee == "print_str") {
-            auto s = dynamic_cast<const StrExpr*>(e->args[0].get());
-            u32 off = iat_->embed_skipped_str(s->value.c_str());
-            emitter_.mov(rcx, (i64)-11);
-            iat_->call("kernel32.dll", "GetStdHandle");
-            emitter_.mov(rbx, rax);
-            emitter_.mov(rcx, rbx);
-            iat_->lea_rip_rdx(off);
-            emitter_.mov(r8, (i64)s->value.size());
-            emitter_.lea(r9, mce::qword_ptr(rsp, 40));
-            emitter_.mov(mce::qword_ptr(rsp, 32), (i32)0);
-            iat_->call("kernel32.dll", "WriteFile");
-            emitter_.mov(rax, (i64)0);
-        }
-        else if (e->callee == "exit") {
-            gen_expr(*e->args[0]);
-            emitter_.mov(rcx, rax);
-            iat_->call("kernel32.dll", "ExitProcess");
+        bool is_declared = declared_functions_.count(e->callee) > 0;
+        
+        if (e->callee == "print_int" || e->callee == "print_str" || e->callee == "exit") {
+            if (!is_declared) {
+                ErrorReporter::error(expr.line, "undefined reference to '" + e->callee + "'", e->callee);
+                std::cerr << "\033[1;36mnote: \033[0mDid you mean '\033[1;32m#include <io.h>\033[0m'?\n";
+                throw std::runtime_error("semantic error");
+            }
+            
+            if (e->callee == "print_int") {
+                gen_expr(*e->args[0]); 
+                emitter_.push(rax); 
+                emitter_.mov(rcx, (i64)-11); 
+                iat_->call("kernel32.dll", "GetStdHandle");
+                emitter_.mov(rbx, rax); 
+                emitter_.pop(rax); 
+                emitter_.lea(rsi, mce::qword_ptr(rsp, 64)); 
+                emitter_.mov(byte_ptr(rsi, 15), (u8)'\n');
+                emitter_.mov(byte_ptr(rsi, 14), (u8)'\r');
+                emitter_.mov(rdi, (i64)13);
+                auto lp = emitter_.make_label();
+                emitter_.bind(lp);
+                emitter_.xor_(edx, edx); emitter_.mov(r10, (i64)10); emitter_.idiv(r10);
+                emitter_.add(dl, (u8)'0'); emitter_.mov(mce::byte_ptr(rsi, rdi, mce::Scale::x1), dl);
+                emitter_.dec(rdi);
+                emitter_.test(rax, rax);
+                emitter_.jnz(lp);
+                emitter_.inc(rdi);
+                emitter_.mov(rcx, rbx);
+                emitter_.lea(rdx, mce::qword_ptr(rsi, rdi, mce::Scale::x1));
+                emitter_.mov(r8, (i64)16); emitter_.sub(r8, rdi);
+                emitter_.lea(r9, mce::qword_ptr(rsp, 100)); 
+                emitter_.mov(mce::qword_ptr(rsp, 32), (i32)0);
+                iat_->call("kernel32.dll", "WriteFile");
+                emitter_.mov(rax, (i64)0);
+            }
+            else if (e->callee == "print_str") {
+                auto s = dynamic_cast<const StrExpr*>(e->args[0].get());
+                u32 off = iat_->embed_skipped_str(s->value.c_str());
+                emitter_.mov(rcx, (i64)-11);
+                iat_->call("kernel32.dll", "GetStdHandle");
+                emitter_.mov(rbx, rax);
+                emitter_.mov(rcx, rbx);
+                iat_->lea_rip_rdx(off);
+                emitter_.mov(r8, (i64)s->value.size());
+                emitter_.lea(r9, mce::qword_ptr(rsp, 40));
+                emitter_.mov(mce::qword_ptr(rsp, 32), (i32)0);
+                iat_->call("kernel32.dll", "WriteFile");
+                emitter_.mov(rax, (i64)0);
+            }
+            else if (e->callee == "exit") {
+                gen_expr(*e->args[0]);
+                emitter_.mov(rcx, rax);
+                iat_->call("kernel32.dll", "ExitProcess");
+            }
         }
         else {
             auto it = function_offsets_.find(e->callee);

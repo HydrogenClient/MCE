@@ -2,6 +2,7 @@
 #include "parser.hpp"
 #include <MCE/emitterx64>
 #include <map>
+#include <set>
 
 namespace tpp {
 
@@ -26,6 +27,7 @@ private:
     
     std::map<std::string, mce::LocalVar> locals_;
     std::map<std::string, unsigned int> function_offsets_;
+    std::set<std::string> declared_functions_;
 };
 
 } // namespace tpp
