@@ -1,5 +1,4 @@
 int main() {
-    intso x;
     print_str("Starting T++ counting demo...\n");
     int i = 1;
     int sum = 0;
