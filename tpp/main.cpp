@@ -1,6 +1,5 @@
-#include "lexer.hpp"
-#include "parser.hpp"
 #include "codegen.hpp"
+#include "errors.hpp"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -29,6 +28,8 @@ int main(int argc, char** argv) {
     std::stringstream ss;
     ss << f.rdbuf();
     std::string source = ss.str();
+
+    tpp::ErrorReporter::init(source, input_file);
 
     try {
         tpp::Lexer lexer(source);

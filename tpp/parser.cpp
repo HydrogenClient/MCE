@@ -1,4 +1,5 @@
 #include "parser.hpp"
+#include "errors.hpp"
 #include <stdexcept>
 
 namespace tpp {
@@ -88,6 +89,14 @@ std::unique_ptr<Stmt> Parser::parse_statement() {
     }
     if (check(TokenType::LBRACE)) return parse_block();
 
+    // Check for "sdhfgl" case (unknown keyword/identifier at start of statement)
+    if (peek().type == TokenType::IDENTIFIER && tokens_[pos_+1].type == TokenType::IDENTIFIER) {
+        std::string name = peek().text;
+        std::vector<std::string> suggestions = {"int", "while", "if", "return", "extern"};
+        ErrorReporter::error(peek().line, "'" + name + "' does not name a type", name, suggestions);
+        throw std::runtime_error("syntax error");
+    }
+
     auto expr = parse_expression();
     match(TokenType::SEMICOLON);
     return std::unique_ptr<Stmt>(new ExprStmt(std::move(expr)));
@@ -159,7 +168,10 @@ std::unique_ptr<Expr> Parser::parse_primary() {
         match(TokenType::RPAREN);
         return expr;
     }
-    throw std::runtime_error("Unexpected token: " + peek().text);
+    
+    std::vector<std::string> suggestions = {"int", "while", "if", "else", "return", "extern", "print_int", "print_str", "exit"};
+    ErrorReporter::error(peek().line, "unexpected token '" + peek().text + "'", peek().text, suggestions);
+    throw std::runtime_error("syntax error");
 }
 
 } // namespace tpp

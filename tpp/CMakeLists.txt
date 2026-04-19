@@ -11,6 +11,7 @@ add_executable(tpp
     lexer.cpp
     parser.cpp
     codegen.cpp
+    errors.cpp
 )
 
 target_link_libraries(tpp PRIVATE MCE)
