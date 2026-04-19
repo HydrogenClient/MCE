@@ -7,6 +7,7 @@
 namespace tpp {
 
 struct Expr {
+    int line = 0;
     virtual ~Expr() = default;
 };
 
@@ -40,6 +41,7 @@ struct CallExpr : Expr {
 };
 
 struct Stmt {
+    int line = 0;
     virtual ~Stmt() = default;
 };
 
@@ -92,6 +94,7 @@ struct Function {
     std::vector<std::string> params;
     std::unique_ptr<BlockStmt> body;
     bool is_extern = false;
+    int line = 0;
 };
 
 class Parser {
