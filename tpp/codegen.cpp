@@ -15,13 +15,8 @@ std::vector<unsigned char> Codegen::compile(unsigned int& entry_offset) {
 
     iat_ = new mce::IATHelper(emitter_, peb_);
 
-    std::set<std::string> declared_functions;
-    for (auto& decl : program_) {
-        if (auto fn = dynamic_cast<const Function*>(decl.get())) {
-            declared_functions.insert(fn->name);
-        }
-    }
-    declared_functions_ = declared_functions; // store for gen_expr
+    declared_functions_.clear();
+    collect_decls(program_, "");
 
     for (auto& decl : program_) {
         gen_decl(*decl, "");
@@ -60,6 +55,18 @@ void Codegen::gen_decl(const Decl& decl, std::string prefix) {
         std::string new_prefix = prefix.empty() ? nd->name : (prefix + "::" + nd->name);
         for (auto& member : nd->members) {
             gen_decl(*member, new_prefix);
+        }
+    }
+}
+
+void Codegen::collect_decls(const std::vector<std::unique_ptr<Decl>>& decls, std::string prefix) {
+    for (auto& decl : decls) {
+        if (auto fn = dynamic_cast<const Function*>(decl.get())) {
+            std::string full_name = prefix.empty() ? fn->name : (prefix + "::" + fn->name);
+            declared_functions_.insert(full_name);
+        } else if (auto nd = dynamic_cast<const NamespaceDecl*>(decl.get())) {
+            std::string sub = prefix.empty() ? nd->name : (prefix + "::" + nd->name);
+            collect_decls(nd->members, sub);
         }
     }
 }
@@ -187,7 +194,12 @@ void Codegen::gen_expr(const Expr& expr) {
     else if (auto e = dynamic_cast<const ScopedVarExpr*>(&expr)) {
         std::string full_name = e->scope + "::" + e->name;
         if (e->scope == "std" && e->name == "cout") {
-            emitter_.mov(rax, (i64)-42); // magic cout id
+            if (global_vars_.count(full_name)) {
+                emitter_.mov(rax, (i64)-42); // magic cout id
+            } else {
+                ErrorReporter::error(expr.line, "undefined scoped member 'std::cout'. Did you forget '#include <io.h>'?");
+                throw std::runtime_error("semantic error");
+            }
         }
         else if (global_vars_.count(full_name)) {
             emitter_.mov(rax, global_vars_[full_name]);

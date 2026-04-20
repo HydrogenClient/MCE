@@ -16,6 +16,7 @@ public:
 private:
     void gen_function(const Function& fn);
     void gen_decl(const Decl& decl, std::string prefix);
+    void collect_decls(const std::vector<std::unique_ptr<Decl>>& decls, std::string prefix);
     void gen_stmt(const Stmt& stmt, std::string prefix);
     void gen_expr(const Expr& expr);
     long long eval_const_expr(const Expr& expr);
