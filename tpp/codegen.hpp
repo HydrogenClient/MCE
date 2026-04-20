@@ -37,6 +37,7 @@ private:
     
     struct StructInfo {
         std::map<std::string, int> offsets;
+        std::map<std::string, bool> is_public;
         int total_size;
     };
     std::map<std::string, StructInfo> structs_;

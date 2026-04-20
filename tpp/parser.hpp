@@ -197,12 +197,14 @@ struct NamespaceDecl : Decl {
 
 struct StructDecl : Decl {
     std::string name;
+    bool is_class;
     struct Member {
         std::string type;
         std::string name;
+        bool is_public;
     };
     std::vector<Member> members;
-    StructDecl(std::string n, std::vector<Member> m) : name(n), members(std::move(m)) {}
+    StructDecl(std::string n, bool ic, std::vector<Member> m) : name(n), is_class(ic), members(std::move(m)) {}
 };
 
 class Parser {

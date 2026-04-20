@@ -15,6 +15,18 @@ std::vector<std::unique_ptr<Decl>> Parser::parse() {
 std::unique_ptr<Decl> Parser::parse_decl() {
     if (match(TokenType::SEMICOLON)) return nullptr;
     
+    match(TokenType::EXPORT);
+    if (match(TokenType::TEMPLATE)) {
+        match(TokenType::LT);
+        int depth = 1;
+        while (depth > 0 && !is_at_end()) {
+            if (match(TokenType::LT)) depth++;
+            else if (match(TokenType::GT)) depth--;
+            else advance();
+        }
+    }
+    while (match(TokenType::INLINE) || match(TokenType::VIRTUAL) || match(TokenType::FRIEND) || match(TokenType::EXPLICIT));
+
     if (match(TokenType::NAMESPACE)) {
         std::string name = advance().text;
         match(TokenType::LBRACE);
@@ -26,20 +38,33 @@ std::unique_ptr<Decl> Parser::parse_decl() {
         return std::unique_ptr<Decl>(new NamespaceDecl(name, std::move(members)));
     }
     
-    if (match(TokenType::STRUCT)) {
+    if (match(TokenType::STRUCT) || match(TokenType::CLASS) || match(TokenType::UNION)) {
+        bool is_class = tokens_[pos_-1].type == TokenType::CLASS;
         std::string name = advance().text;
         match(TokenType::LBRACE);
         std::vector<StructDecl::Member> m;
+        bool is_public = !is_class; // Structs default to public, classes to private
+
         while (!check(TokenType::RBRACE) && !is_at_end()) {
+            if (match(TokenType::PUBLIC)) {
+                is_public = true;
+                match(TokenType::COLON);
+                continue;
+            } else if (match(TokenType::PRIVATE) || match(TokenType::PROTECTED)) {
+                is_public = false;
+                match(TokenType::COLON);
+                continue;
+            }
+            while (match(TokenType::CONST) || match(TokenType::STATIC) || match(TokenType::VOLATILE) || match(TokenType::MUTABLE) || match(TokenType::UNSIGNED) || match(TokenType::SIGNED));
             std::string type = advance().text;
             std::string member_name = advance().text;
             match(TokenType::SEMICOLON);
-            m.push_back({type, member_name});
+            m.push_back({type, member_name, is_public});
         }
         match(TokenType::RBRACE);
         match(TokenType::SEMICOLON);
         types_.insert(name);
-        return std::unique_ptr<Decl>(new StructDecl(name, std::move(m)));
+        return std::unique_ptr<Decl>(new StructDecl(name, is_class, std::move(m)));
     }
     
     if (check(TokenType::ENUM) || check(TokenType::USING) || check(TokenType::STATIC_ASSERT)) {
@@ -121,7 +146,15 @@ std::unique_ptr<Stmt> Parser::parse_statement() {
     std::unique_ptr<Stmt> res;
 
     bool is_constexpr = match(TokenType::CONSTEXPR);
-    if (is_constexpr || (peek().type == TokenType::IDENTIFIER && types_.count(peek().text)) || check(TokenType::INT) || check(TokenType::AUTO) || check(TokenType::DECLTYPE) || check(TokenType::LONG)) {
+    if (match(TokenType::ALIGNAS)) {
+        match(TokenType::LPAREN);
+        while (!check(TokenType::RPAREN) && !is_at_end()) advance();
+        match(TokenType::RPAREN);
+    }
+    match(TokenType::TYPEDEF);
+    while (match(TokenType::CONST) || match(TokenType::STATIC) || match(TokenType::VOLATILE) || match(TokenType::MUTABLE) || match(TokenType::THREAD_LOCAL) || match(TokenType::UNSIGNED) || match(TokenType::SIGNED) || match(TokenType::VIRTUAL) || match(TokenType::EXPLICIT) || match(TokenType::INLINE));
+    
+    if (is_constexpr || (peek().type == TokenType::IDENTIFIER && types_.count(peek().text)) || check(TokenType::INT) || check(TokenType::AUTO) || check(TokenType::DECLTYPE) || check(TokenType::LONG) || check(TokenType::CHAR) || check(TokenType::SHORT) || check(TokenType::FLOAT) || check(TokenType::DOUBLE) || check(TokenType::BOOL) || check(TokenType::WCHAR_T) || check(TokenType::CHAR16_T) || check(TokenType::CHAR32_T)) {
         std::string type_name = "int";
         if (is_constexpr) {
              if (types_.count(peek().text)) type_name = advance().text;
@@ -131,7 +164,7 @@ std::unique_ptr<Stmt> Parser::parse_statement() {
                   match(TokenType::RPAREN);
                   type_name = "decltype";
              }
-             else { match(TokenType::INT); type_name = "int"; }
+             else { advance(); type_name = "int"; } // fallback read type
         } else if (match(TokenType::DECLTYPE)) {
              match(TokenType::LPAREN);
              parse_expression();
@@ -258,6 +291,28 @@ std::unique_ptr<Stmt> Parser::parse_statement() {
         auto val = parse_expression();
         match(TokenType::SEMICOLON);
         res.reset(new ReturnStmt(std::move(val)));
+    }
+    else if (match(TokenType::TRY)) {
+        auto try_block = parse_block();
+        while (match(TokenType::CATCH)) {
+            match(TokenType::LPAREN);
+            while (!check(TokenType::RPAREN) && !is_at_end()) advance();
+            match(TokenType::RPAREN);
+            parse_block(); // skip catch block
+        }
+        return try_block; // evaluate the try block directly for now
+    }
+    else if (match(TokenType::THROW)) {
+        auto val = parse_expression();
+        match(TokenType::SEMICOLON);
+        res.reset(new ExprStmt(std::move(val))); // stub to evaluate expression
+    }
+    else if (match(TokenType::ASM)) {
+        match(TokenType::LPAREN);
+        advance(); // string
+        match(TokenType::RPAREN);
+        match(TokenType::SEMICOLON);
+        res.reset(new Stmt()); // Empty/no-op
     }
     else if (check(TokenType::LBRACE)) return parse_block();
     else if (peek().type == TokenType::IDENTIFIER && tokens_[pos_+1].type == TokenType::IDENTIFIER) {
@@ -414,6 +469,30 @@ std::unique_ptr<Expr> Parser::parse_primary() {
                 res.reset(new VarExpr(full_name));
             }
         }
+    }
+    else if (match(TokenType::ALIGNAS) || match(TokenType::ALIGNOF) || match(TokenType::TYPEID)) {
+        match(TokenType::LPAREN);
+        while (!check(TokenType::RPAREN) && !is_at_end()) advance();
+        match(TokenType::RPAREN);
+        res.reset(new IntExpr(1)); // stub size/align result
+    }
+    else if (match(TokenType::REINTERPRET_CAST) || match(TokenType::DYNAMIC_CAST) || match(TokenType::STATIC_CAST) || match(TokenType::CONST_CAST)) {
+        match(TokenType::LT);
+        advance(); // Skip type
+        match(TokenType::GT);
+        match(TokenType::LPAREN);
+        auto expr = parse_expression();
+        match(TokenType::RPAREN);
+        res = std::move(expr);
+    }
+    else if (match(TokenType::NEW)) {
+        advance(); // class name
+        if (match(TokenType::LPAREN)) match(TokenType::RPAREN);
+        res.reset(new IntExpr(0)); // stub allocation for now
+    }
+    else if (match(TokenType::DELETE)) {
+        parse_expression();
+        res.reset(new NullExpr());
     }
     else if (match(TokenType::LPAREN)) {
         auto expr = parse_expression();

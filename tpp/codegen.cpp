@@ -62,6 +62,7 @@ void Codegen::gen_decl(const Decl& decl, std::string prefix) {
         int current_offset = 0;
         for (auto& m : sd->members) {
             info.offsets[m.name] = current_offset;
+            info.is_public[m.name] = m.is_public;
             current_offset += 8; // all types are 8-byte in T++ for now
         }
         info.total_size = current_offset;
@@ -243,6 +244,10 @@ void Codegen::gen_expr(const Expr& expr) {
              std::string type = var_types_[v->name];
              if (structs_.count(type)) {
                   auto& info = structs_[type];
+                  if (!info.is_public[e->member]) {
+                      ErrorReporter::error(expr.line, "cannot access private member '" + e->member + "' of class '" + type + "'", e->member);
+                      throw std::runtime_error("semantic error");
+                  }
                   int offset = info.offsets.at(e->member);
                   emitter_.lea(rax, current_fn_->local_mem(v->name));
                   emitter_.mov(rax, mce::qword_ptr(rax, offset));
@@ -258,6 +263,10 @@ void Codegen::gen_expr(const Expr& expr) {
                  std::string type = var_types_[v->name];
                  if (structs_.count(type)) {
                       auto& info = structs_[type];
+                      if (!info.is_public[m->member]) {
+                          ErrorReporter::error(expr.line, "cannot access private member '" + m->member + "' of class '" + type + "'", m->member);
+                          throw std::runtime_error("semantic error");
+                      }
                       int offset = info.offsets.at(m->member);
                       gen_expr(*e->value);
                       emitter_.push(rax); 
