@@ -4,29 +4,76 @@
 
 namespace tpp {
 
-std::vector<std::unique_ptr<Function>> Parser::parse() {
-    std::vector<std::unique_ptr<Function>> program;
+std::vector<std::unique_ptr<Decl>> Parser::parse() {
+    std::vector<std::unique_ptr<Decl>> program;
     while (!is_at_end()) {
-        program.push_back(parse_function());
+        if (auto d = parse_decl()) program.push_back(std::move(d));
     }
     return program;
+}
+
+std::unique_ptr<Decl> Parser::parse_decl() {
+    if (match(TokenType::SEMICOLON)) return nullptr;
+    
+    if (match(TokenType::NAMESPACE)) {
+        std::string name = advance().text;
+        match(TokenType::LBRACE);
+        std::vector<std::unique_ptr<Decl>> members;
+        while (!check(TokenType::RBRACE) && !is_at_end()) {
+            if (auto d = parse_decl()) members.push_back(std::move(d));
+        }
+        match(TokenType::RBRACE);
+        return std::unique_ptr<Decl>(new NamespaceDecl(name, std::move(members)));
+    }
+    
+    if (check(TokenType::ENUM) || check(TokenType::USING) || check(TokenType::STATIC_ASSERT)) {
+        return std::unique_ptr<Decl>(new StmtDecl(parse_statement()));
+    }
+    
+    // Check if function or var
+    if (pos_ + 2 < tokens_.size() && tokens_[pos_+2].type == TokenType::LPAREN) {
+        return parse_function();
+    } else if (pos_ + 1 < tokens_.size() && tokens_[pos_].type == TokenType::EXTERN && pos_ + 3 < tokens_.size() && tokens_[pos_+3].type == TokenType::LPAREN) {
+        return parse_function();
+    } else {
+        return std::unique_ptr<Decl>(new StmtDecl(parse_statement()));
+    }
 }
 
 std::unique_ptr<Function> Parser::parse_function() {
     int line = peek().line;
     bool is_ext = match(TokenType::EXTERN);
-    match(TokenType::INT); // return type (always int for now)
+    if (types_.count(peek().text)) advance();
+    else if (match(TokenType::DECLTYPE)) {
+        match(TokenType::LPAREN);
+        parse_expression();
+        match(TokenType::RPAREN);
+    }
+    else match(TokenType::INT); // fallback
     
     std::string name = advance().text;
     match(TokenType::LPAREN);
     std::vector<std::string> params;
     if (!check(TokenType::RPAREN)) {
         do {
-            match(TokenType::INT);
+            if (types_.count(peek().text)) advance();
+            else match(TokenType::INT);
             params.push_back(advance().text);
         } while (match(TokenType::COMMA));
     }
     match(TokenType::RPAREN);
+
+    if (match(TokenType::ARROW)) {
+        if (types_.count(peek().text)) advance();
+        else if (match(TokenType::DECLTYPE)) {
+            match(TokenType::LPAREN);
+            parse_expression();
+            match(TokenType::RPAREN);
+        }
+        else if (check(TokenType::INT)) advance();
+    }
+
+    while (match(TokenType::FINAL) || match(TokenType::OVERRIDE));
     
     auto fn = std::unique_ptr<Function>(new Function());
     fn->name = name;
@@ -57,12 +104,65 @@ std::unique_ptr<Stmt> Parser::parse_statement() {
     int line = peek().line;
     std::unique_ptr<Stmt> res;
 
-    if (match(TokenType::INT)) {
+    bool is_constexpr = match(TokenType::CONSTEXPR);
+    if (is_constexpr || (peek().type == TokenType::IDENTIFIER && types_.count(peek().text)) || check(TokenType::INT) || check(TokenType::AUTO) || check(TokenType::DECLTYPE)) {
+        if (is_constexpr) {
+             if (types_.count(peek().text)) advance();
+             else if (match(TokenType::DECLTYPE)) {
+                  match(TokenType::LPAREN);
+                  parse_expression();
+                  match(TokenType::RPAREN);
+             }
+             else match(TokenType::INT);
+        } else if (match(TokenType::DECLTYPE)) {
+             match(TokenType::LPAREN);
+             parse_expression();
+             match(TokenType::RPAREN);
+        } else {
+             advance();
+        }
         std::string name = advance().text;
         std::unique_ptr<Expr> init = nullptr;
         if (match(TokenType::ASSIGN)) init = parse_expression();
         match(TokenType::SEMICOLON);
         res.reset(new VarDeclStmt(name, std::move(init)));
+    }
+    else if (match(TokenType::STATIC_ASSERT)) {
+        match(TokenType::LPAREN);
+        auto cond = parse_expression();
+        match(TokenType::COMMA);
+        std::string msg = advance().text;
+        match(TokenType::RPAREN);
+        match(TokenType::SEMICOLON);
+        res.reset(new StaticAssertStmt(std::move(cond), msg));
+    }
+    else if (match(TokenType::USING)) {
+        std::string name = advance().text;
+        match(TokenType::ASSIGN);
+        if (types_.count(peek().text)) advance();
+        else match(TokenType::INT);
+        match(TokenType::SEMICOLON);
+        types_.insert(name);
+        res.reset(new TypeAliasStmt(name));
+    }
+    else if (match(TokenType::ENUM)) {
+        match(TokenType::CLASS);
+        std::string name = advance().text;
+        match(TokenType::LBRACE);
+        std::vector<std::pair<std::string, long long>> values;
+        long long current_val = 0;
+        while (!check(TokenType::RBRACE) && !is_at_end()) {
+            std::string key = advance().text;
+            if (match(TokenType::ASSIGN)) {
+                current_val = std::stoll(advance().text);
+            }
+            values.push_back({key, current_val++});
+            if (!match(TokenType::COMMA)) break;
+        }
+        match(TokenType::RBRACE);
+        match(TokenType::SEMICOLON);
+        types_.insert(name);
+        res.reset(new EnumStmt(name, std::move(values)));
     }
     else if (match(TokenType::WHILE)) {
         match(TokenType::LPAREN);
@@ -93,6 +193,10 @@ std::unique_ptr<Stmt> Parser::parse_statement() {
         res.reset(new AssignStmt(name, std::move(val)));
     }
     else if (check(TokenType::LBRACE)) return parse_block();
+    else if (peek().type == TokenType::IDENTIFIER && types_.count(peek().text) && tokens_[pos_+1].type == TokenType::IDENTIFIER) {
+        // Handled by the first if block now
+        return parse_statement();
+    }
     else if (peek().type == TokenType::IDENTIFIER && tokens_[pos_+1].type == TokenType::IDENTIFIER) {
         std::string name = peek().text;
         std::vector<std::string> suggestions = {"int", "while", "if", "return", "extern"};
@@ -128,8 +232,21 @@ std::unique_ptr<Expr> Parser::parse_equality() {
 
 std::unique_ptr<Expr> Parser::parse_comparison() {
     int line = peek().line;
-    auto left = parse_term();
+    auto left = parse_shift();
     while (match(TokenType::LT) || match(TokenType::GT)) {
+        TokenType op = tokens_[pos_-1].type;
+        auto right = parse_shift();
+        auto next = std::unique_ptr<BinaryExpr>(new BinaryExpr(op, std::move(left), std::move(right)));
+        next->line = line;
+        left = std::move(next);
+    }
+    return left;
+}
+
+std::unique_ptr<Expr> Parser::parse_shift() {
+    int line = peek().line;
+    auto left = parse_term();
+    while (match(TokenType::LSH)) {
         TokenType op = tokens_[pos_-1].type;
         auto right = parse_term();
         auto next = std::unique_ptr<BinaryExpr>(new BinaryExpr(op, std::move(left), std::move(right)));
@@ -175,8 +292,15 @@ std::unique_ptr<Expr> Parser::parse_primary() {
     else if (match(TokenType::STRING)) {
         res.reset(new StrExpr(tokens_[pos_-1].text));
     }
+    else if (match(TokenType::NULLPTR_TOKEN)) {
+        res.reset(new NullExpr());
+    }
     else if (match(TokenType::IDENTIFIER)) {
-        std::string name = tokens_[pos_-1].text;
+        std::string full_name = tokens_[pos_-1].text;
+        while (match(TokenType::COLON_COLON)) {
+            full_name += "::" + advance().text;
+        }
+        
         if (match(TokenType::LPAREN)) {
             std::vector<std::unique_ptr<Expr>> args;
             if (!check(TokenType::RPAREN)) {
@@ -185,9 +309,17 @@ std::unique_ptr<Expr> Parser::parse_primary() {
                 } while (match(TokenType::COMMA));
             }
             match(TokenType::RPAREN);
-            res.reset(new CallExpr(name, std::move(args)));
+            res.reset(new CallExpr(full_name, std::move(args)));
         } else {
-            res.reset(new VarExpr(name));
+            // Split back into scope and name if it's a ScopedVarExpr
+            size_t last_cc = full_name.find_last_of(":");
+            if (last_cc != std::string::npos) {
+                std::string scope = full_name.substr(0, last_cc - 1);
+                std::string name = full_name.substr(last_cc + 1);
+                res.reset(new ScopedVarExpr(scope, name));
+            } else {
+                res.reset(new VarExpr(full_name));
+            }
         }
     }
     else if (match(TokenType::LPAREN)) {

@@ -19,12 +19,16 @@ A powerful, header-only backend for emitting x64 machine code and generating val
   - `IATHelper`: Handles cross-section patching and Win64 API calls.
 
 ### 2. [T++ Compiler (Tiny++)](tpp/)
-A lightweight C-like frontend that demonstrates the power of MCE.
+A lightweight C++11 frontend that demonstrates the power of MCE.
 
-- **Types**: 64-bit integers (`int`).
+- **C++11 Constructs**: Full support for `auto`, `nullptr`, `constexpr`, `static_assert`, `enum class`, and `using` type aliases.
+- **Modern Syntax**: `decltype(expr)` and trailing return types (e.g., `auto main() -> int`).
+- **Namespaces**: Recursive nested namespaces (`namespace a { namespace b {} }`) and multi-level scoping (`a::b::c`).
+- **Stream I/O**: `std::cout`-style output with `<<` operator chaining.
+- **Literal Support**: Binary literals (`0b1101`), digit separators (`1'000'000`), and basic float-literal parsing (truncated to integer).
 - **Control Flow**: `if`, `else`, `while`, `return`.
-- **Built-in Functions**: `print_int(n)`, `print_str("text")`, `exit(code)`.
 - **Diagnostics**: User-friendly, `g++`-style error reporting with code snippets and "did you mean?" suggestions.
+- **Comments**: Support for `//` single-line and `/* ... */` multi-line comments.
 
 ---
 
@@ -55,13 +59,22 @@ The build process will generate:
 ### Compiling T++ Code
 Create a file named `sample.tpp`:
 ```cpp
-int main() {
-    print_str("Counting to 5...\n");
-    int i = 1;
-    while (i < 6) {
-        print_int(i);
-        i = i + 1;
+#include <io.h>
+
+namespace math {
+    namespace constants {
+        auto pi = 3.141'592;
     }
+}
+
+int main() {
+    auto val = 0b1010'1010;
+    std::cout << "PI is about: " << math::constants::pi << "\n";
+    std::cout << "Binary literal with separators: " << val << "\n";
+    
+    int i = 1'000;
+    std::cout << "Large number: " << i << "\n";
+    
     return 0;
 }
 ```

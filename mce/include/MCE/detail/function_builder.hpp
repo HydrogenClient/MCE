@@ -121,6 +121,9 @@ public:
         e_.call(target);
     }
 
+    // ── Diagnostics ──────────────────────────────────────────────────────
+    const std::unordered_map<std::string, LocalVar>& locals() const { return locals_; }
+
     // ── Raw emitter access ───────────────────────────────────────────────
     EmitterX64& emitter() { return e_; }
 

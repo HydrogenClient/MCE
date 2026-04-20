@@ -7,6 +7,8 @@ namespace tpp {
 enum class TokenType {
     // Keywords
     INT, WHILE, IF, ELSE, RETURN, EXTERN,
+    AUTO, NULLPTR_TOKEN, STATIC_ASSERT, USING, ENUM, CLASS, CONSTEXPR, NAMESPACE,
+    DECLTYPE, FINAL, OVERRIDE,
     
     // Literals
     IDENTIFIER, NUMBER, STRING,
@@ -14,7 +16,7 @@ enum class TokenType {
     // Operators/Symbols
     LPAREN, RPAREN, LBRACE, RBRACE, SEMICOLON, COMMA,
     ASSIGN, PLUS, MINUS, STAR, SLASH,
-    LT, GT, EQEQ, NEQ,
+    LT, GT, EQEQ, NEQ, COLON_COLON, LSH, ARROW,
     
     EOF_TOKEN
 };

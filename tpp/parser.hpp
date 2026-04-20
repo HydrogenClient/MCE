@@ -3,6 +3,7 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <set>
 
 namespace tpp {
 
@@ -24,6 +25,16 @@ struct StrExpr : Expr {
 struct VarExpr : Expr {
     std::string name;
     explicit VarExpr(std::string n) : name(n) {}
+};
+
+struct ScopedVarExpr : Expr {
+    std::string scope;
+    std::string name;
+    ScopedVarExpr(std::string s, std::string n) : scope(s), name(n) {}
+};
+
+struct NullExpr : Expr {
+    NullExpr() = default;
 };
 
 struct BinaryExpr : Expr {
@@ -89,7 +100,30 @@ struct ReturnStmt : Stmt {
     explicit ReturnStmt(std::unique_ptr<Expr> v) : value(std::move(v)) {}
 };
 
-struct Function {
+struct StaticAssertStmt : Stmt {
+    std::unique_ptr<Expr> cond;
+    std::string message;
+    StaticAssertStmt(std::unique_ptr<Expr> c, std::string m)
+        : cond(std::move(c)), message(std::move(m)) {}
+};
+
+struct TypeAliasStmt : Stmt {
+    std::string name;
+    TypeAliasStmt(std::string n) : name(n) {}
+};
+
+struct EnumStmt : Stmt {
+    std::string name;
+    std::vector<std::pair<std::string, long long>> values;
+    EnumStmt(std::string n, std::vector<std::pair<std::string, long long>> v)
+        : name(n), values(std::move(v)) {}
+};
+
+struct Decl {
+    virtual ~Decl() = default;
+};
+
+struct Function : Decl {
     std::string name;
     std::vector<std::string> params;
     std::unique_ptr<BlockStmt> body;
@@ -97,18 +131,32 @@ struct Function {
     int line = 0;
 };
 
+struct StmtDecl : Decl {
+    std::unique_ptr<Stmt> stmt;
+    explicit StmtDecl(std::unique_ptr<Stmt> s) : stmt(std::move(s)) {}
+};
+
+struct NamespaceDecl : Decl {
+    std::string name;
+    std::vector<std::unique_ptr<Decl>> members;
+    NamespaceDecl(std::string n, std::vector<std::unique_ptr<Decl>> m)
+        : name(n), members(std::move(m)) {}
+};
+
 class Parser {
 public:
     explicit Parser(const std::vector<Token>& tokens) : tokens_(tokens) {}
-    std::vector<std::unique_ptr<Function>> parse();
+    std::vector<std::unique_ptr<Decl>> parse();
 
 private:
+    std::unique_ptr<Decl> parse_decl();
     std::unique_ptr<Function> parse_function();
     std::unique_ptr<BlockStmt> parse_block();
     std::unique_ptr<Stmt> parse_statement();
     std::unique_ptr<Expr> parse_expression();
     std::unique_ptr<Expr> parse_equality();
     std::unique_ptr<Expr> parse_comparison();
+    std::unique_ptr<Expr> parse_shift();
     std::unique_ptr<Expr> parse_term();
     std::unique_ptr<Expr> parse_factor();
     std::unique_ptr<Expr> parse_primary();
@@ -121,6 +169,7 @@ private:
 
     std::vector<Token> tokens_;
     size_t pos_ = 0;
+    std::set<std::string> types_ = {"int", "auto", "long long"};
 };
 
 } // namespace tpp
