@@ -34,6 +34,16 @@ private:
     std::map<std::string, mce::LocalVar> locals_;
     std::map<std::string, unsigned int> function_offsets_;
     std::set<std::string> declared_functions_;
+    
+    struct StructInfo {
+        std::map<std::string, int> offsets;
+        int total_size;
+    };
+    std::map<std::string, StructInfo> structs_;
+    std::map<std::string, std::string> var_types_;
+    
+    std::vector<mce::Label> loop_breaks_;
+    std::vector<mce::Label> loop_continues_;
 };
 
 } // namespace tpp

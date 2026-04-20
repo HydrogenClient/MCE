@@ -44,6 +44,20 @@ struct BinaryExpr : Expr {
         : op(o), left(std::move(l)), right(std::move(r)) {}
 };
 
+struct AssignExpr : Expr {
+    std::unique_ptr<Expr> target;
+    std::unique_ptr<Expr> value;
+    AssignExpr(std::unique_ptr<Expr> t, std::unique_ptr<Expr> v) : target(std::move(t)), value(std::move(v)) {}
+};
+
+struct UnaryExpr : Expr {
+    TokenType op;
+    std::unique_ptr<Expr> operand;
+    bool is_postfix;
+    UnaryExpr(TokenType o, std::unique_ptr<Expr> opnd, bool post)
+        : op(o), operand(std::move(opnd)), is_postfix(post) {}
+};
+
 struct CallExpr : Expr {
     std::string callee;
     std::vector<std::unique_ptr<Expr>> args;
@@ -57,10 +71,11 @@ struct Stmt {
 };
 
 struct VarDeclStmt : Stmt {
+    std::string type;
     std::string name;
     std::unique_ptr<Expr> init;
-    VarDeclStmt(std::string n, std::unique_ptr<Expr> i)
-        : name(n), init(std::move(i)) {}
+    VarDeclStmt(std::string t, std::string n, std::unique_ptr<Expr> i)
+        : type(t), name(n), init(std::move(i)) {}
 };
 
 struct AssignStmt : Stmt {
@@ -83,6 +98,43 @@ struct WhileStmt : Stmt {
     std::unique_ptr<Stmt> body;
     WhileStmt(std::unique_ptr<Expr> c, std::unique_ptr<Stmt> b)
         : cond(std::move(c)), body(std::move(b)) {}
+};
+
+struct ForStmt : Stmt {
+    std::unique_ptr<Stmt> init;
+    std::unique_ptr<Expr> cond;
+    std::unique_ptr<Expr> inc;
+    std::unique_ptr<Stmt> body;
+    ForStmt(std::unique_ptr<Stmt> i, std::unique_ptr<Expr> c, std::unique_ptr<Expr> in, std::unique_ptr<Stmt> b) 
+        : init(std::move(i)), cond(std::move(c)), inc(std::move(in)), body(std::move(b)) {}
+};
+
+struct DoWhileStmt : Stmt {
+    std::unique_ptr<Stmt> body;
+    std::unique_ptr<Expr> cond;
+    DoWhileStmt(std::unique_ptr<Stmt> b, std::unique_ptr<Expr> c) : body(std::move(b)), cond(std::move(c)) {}
+};
+
+struct BreakStmt : Stmt {};
+struct ContinueStmt : Stmt {};
+
+struct SwitchStmt : Stmt {
+    std::unique_ptr<Expr> cond;
+    std::unique_ptr<Stmt> body;
+    SwitchStmt(std::unique_ptr<Expr> c, std::unique_ptr<Stmt> b) : cond(std::move(c)), body(std::move(b)) {}
+};
+
+struct CaseStmt : Stmt {
+    std::unique_ptr<Expr> value;
+    CaseStmt(std::unique_ptr<Expr> v) : value(std::move(v)) {}
+};
+
+struct DefaultStmt : Stmt {};
+
+struct MemberExpr : Expr {
+    std::unique_ptr<Expr> object;
+    std::string member;
+    MemberExpr(std::unique_ptr<Expr> o, std::string m) : object(std::move(o)), member(m) {}
 };
 
 struct BlockStmt : Stmt {
@@ -143,6 +195,16 @@ struct NamespaceDecl : Decl {
         : name(n), members(std::move(m)) {}
 };
 
+struct StructDecl : Decl {
+    std::string name;
+    struct Member {
+        std::string type;
+        std::string name;
+    };
+    std::vector<Member> members;
+    StructDecl(std::string n, std::vector<Member> m) : name(n), members(std::move(m)) {}
+};
+
 class Parser {
 public:
     explicit Parser(const std::vector<Token>& tokens) : tokens_(tokens) {}
@@ -154,6 +216,7 @@ private:
     std::unique_ptr<BlockStmt> parse_block();
     std::unique_ptr<Stmt> parse_statement();
     std::unique_ptr<Expr> parse_expression();
+    std::unique_ptr<Expr> parse_assignment();
     std::unique_ptr<Expr> parse_equality();
     std::unique_ptr<Expr> parse_comparison();
     std::unique_ptr<Expr> parse_shift();
@@ -164,12 +227,13 @@ private:
     const Token& peek() const { return tokens_[pos_]; }
     const Token& advance() { if (!is_at_end()) pos_++; return tokens_[pos_-1]; }
     bool check(TokenType type) const { return !is_at_end() && peek().type == type; }
+    bool check_next(TokenType type) const { if (is_at_end()) return false; if (pos_ + 1 >= tokens_.size()) return false; return tokens_[pos_ + 1].type == type; }
     bool match(TokenType type) { if (check(type)) { advance(); return true; } return false; }
     bool is_at_end() const { return peek().type == TokenType::EOF_TOKEN; }
 
     std::vector<Token> tokens_;
     size_t pos_ = 0;
-    std::set<std::string> types_ = {"int", "auto", "long long"};
+    std::set<std::string> types_ = {"int", "auto", "long", "long long", "bool", "void", "char", "short", "unsigned", "signed", "float", "double", "wchar_t", "char16_t", "char32_t"};
 };
 
 } // namespace tpp

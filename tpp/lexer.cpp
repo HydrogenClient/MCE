@@ -22,6 +22,74 @@ static const std::unordered_map<std::string, TokenType> KEYWORDS = {
     {"decltype",      TokenType::DECLTYPE},
     {"final",         TokenType::FINAL},
     {"override",      TokenType::OVERRIDE},
+    {"for",           TokenType::FOR},
+    {"long",          TokenType::LONG},
+    {"bool",          TokenType::BOOL},
+    {"true",          TokenType::TRUE_TOKEN},
+    {"false",         TokenType::FALSE_TOKEN},
+    {"void",          TokenType::VOID},
+    {"break",         TokenType::BREAK},
+    {"continue",      TokenType::CONTINUE},
+    {"do",            TokenType::DO},
+    {"switch",        TokenType::SWITCH},
+    {"case",          TokenType::CASE},
+    {"default",       TokenType::DEFAULT},
+    {"char",          TokenType::CHAR},
+    {"short",         TokenType::SHORT},
+    {"unsigned",      TokenType::UNSIGNED},
+    {"signed",        TokenType::SIGNED},
+    {"struct",        TokenType::STRUCT},
+    {"sizeof",        TokenType::SIZEOF},
+    {"goto",          TokenType::GOTO},
+    {"static",        TokenType::STATIC},
+    {"inline",        TokenType::INLINE},
+    {"alignas",       TokenType::ALIGNAS},
+    {"alignof",       TokenType::ALIGNOF},
+    {"and",           TokenType::AND},
+    {"and_eq",        TokenType::AND_EQ},
+    {"asm",           TokenType::ASM},
+    {"bitand",        TokenType::BITAND},
+    {"bitor",         TokenType::BITOR},
+    {"catch",         TokenType::CATCH},
+    {"char16_t",      TokenType::CHAR16_T},
+    {"char32_t",      TokenType::CHAR32_T},
+    {"compl",         TokenType::COMPL},
+    {"const",         TokenType::CONST},
+    {"const_cast",    TokenType::CONST_CAST},
+    {"delete",        TokenType::DELETE},
+    {"double",        TokenType::DOUBLE},
+    {"dynamic_cast",  TokenType::DYNAMIC_CAST},
+    {"explicit",      TokenType::EXPLICIT},
+    {"export",        TokenType::EXPORT},
+    {"float",         TokenType::FLOAT},
+    {"friend",        TokenType::FRIEND},
+    {"mutable",       TokenType::MUTABLE},
+    {"new",           TokenType::NEW},
+    {"noexcept",      TokenType::NOEXCEPT},
+    {"not",           TokenType::NOT},
+    {"not_eq",        TokenType::NOT_EQ},
+    {"operator",      TokenType::OPERATOR},
+    {"or",            TokenType::OR},
+    {"or_eq",         TokenType::OR_EQ},
+    {"private",       TokenType::PRIVATE},
+    {"protected",     TokenType::PROTECTED},
+    {"public",        TokenType::PUBLIC},
+    {"reinterpret_cast", TokenType::REINTERPRET_CAST},
+    {"static_cast",   TokenType::STATIC_CAST},
+    {"template",      TokenType::TEMPLATE},
+    {"this",          TokenType::THIS},
+    {"thread_local",  TokenType::THREAD_LOCAL},
+    {"throw",         TokenType::THROW},
+    {"try",           TokenType::TRY},
+    {"typedef",       TokenType::TYPEDEF},
+    {"typeid",        TokenType::TYPEID},
+    {"typename",      TokenType::TYPENAME},
+    {"union",         TokenType::UNION},
+    {"virtual",       TokenType::VIRTUAL},
+    {"volatile",      TokenType::VOLATILE},
+    {"wchar_t",       TokenType::WCHAR_T},
+    {"xor",           TokenType::XOR},
+    {"xor_eq",        TokenType::XOR_EQ},
 };
 
 std::vector<Token> Lexer::tokenize() {
@@ -90,11 +158,17 @@ std::vector<Token> Lexer::tokenize() {
                 case ';': tokens.push_back({TokenType::SEMICOLON, ";", line_}); break;
                 case ':':
                     if (peek() == ':') { advance(); tokens.push_back({TokenType::COLON_COLON, "::", line_}); }
+                    else { tokens.push_back({TokenType::COLON, ":", line_}); }
                     break;
+                case '.': tokens.push_back({TokenType::DOT, ".", line_}); break;
                 case ',': tokens.push_back({TokenType::COMMA, ",", line_}); break;
-                case '+': tokens.push_back({TokenType::PLUS, "+", line_}); break;
+                case '+': 
+                    if (peek() == '+') { advance(); tokens.push_back({TokenType::INC, "++", line_}); }
+                    else { tokens.push_back({TokenType::PLUS, "+", line_}); }
+                    break;
                 case '-':
-                    if (peek() == '>') { advance(); tokens.push_back({TokenType::ARROW, "->", line_}); }
+                    if (peek() == '-') { advance(); tokens.push_back({TokenType::DEC, "--", line_}); }
+                    else if (peek() == '>') { advance(); tokens.push_back({TokenType::ARROW, "->", line_}); }
                     else { tokens.push_back({TokenType::MINUS, "-", line_}); }
                     break;
                 case '*': tokens.push_back({TokenType::STAR, "*", line_}); break;

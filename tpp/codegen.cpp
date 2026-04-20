@@ -57,6 +57,16 @@ void Codegen::gen_decl(const Decl& decl, std::string prefix) {
             gen_decl(*member, new_prefix);
         }
     }
+    else if (auto sd = dynamic_cast<const StructDecl*>(&decl)) {
+        StructInfo info;
+        int current_offset = 0;
+        for (auto& m : sd->members) {
+            info.offsets[m.name] = current_offset;
+            current_offset += 8; // all types are 8-byte in T++ for now
+        }
+        info.total_size = current_offset;
+        structs_[sd->name] = info;
+    }
 }
 
 void Codegen::collect_decls(const std::vector<std::unique_ptr<Decl>>& decls, std::string prefix) {
@@ -97,7 +107,10 @@ void Codegen::gen_function(const Function& fn) {
 void Codegen::gen_stmt(const Stmt& stmt, std::string prefix) {
     if (auto s = dynamic_cast<const VarDeclStmt*>(&stmt)) {
         if (current_fn_) {
-            current_fn_->alloc(s->name, 8);
+            var_types_[s->name] = s->type;
+            int size = 8;
+            if (structs_.count(s->type)) size = structs_[s->type].total_size;
+            current_fn_->alloc(s->name, size);
             if (s->init) {
                 gen_expr(*s->init);
                 emitter_.mov(current_fn_->local_mem(s->name), rax);
@@ -132,6 +145,8 @@ void Codegen::gen_stmt(const Stmt& stmt, std::string prefix) {
     else if (auto s = dynamic_cast<const WhileStmt*>(&stmt)) {
         auto start = emitter_.make_label();
         auto end = emitter_.make_label();
+        loop_continues_.push_back(start);
+        loop_breaks_.push_back(end);
         emitter_.bind(start);
         gen_expr(*s->cond);
         emitter_.test(rax, rax);
@@ -139,6 +154,51 @@ void Codegen::gen_stmt(const Stmt& stmt, std::string prefix) {
         gen_stmt(*s->body, prefix);
         emitter_.jmp(start);
         emitter_.bind(end);
+        loop_continues_.pop_back();
+        loop_breaks_.pop_back();
+    }
+    else if (auto s = dynamic_cast<const ForStmt*>(&stmt)) {
+        if (s->init) gen_stmt(*s->init, prefix);
+        auto start = emitter_.make_label();
+        auto cont = emitter_.make_label();
+        auto end = emitter_.make_label();
+        loop_continues_.push_back(cont);
+        loop_breaks_.push_back(end);
+        emitter_.bind(start);
+        if (s->cond) {
+            gen_expr(*s->cond);
+            emitter_.test(rax, rax);
+            emitter_.jz(end);
+        }
+        gen_stmt(*s->body, prefix);
+        emitter_.bind(cont);
+        if (s->inc) gen_expr(*s->inc);
+        emitter_.jmp(start);
+        emitter_.bind(end);
+        loop_continues_.pop_back();
+        loop_breaks_.pop_back();
+    }
+    else if (auto s = dynamic_cast<const DoWhileStmt*>(&stmt)) {
+        auto start = emitter_.make_label();
+        auto cont = emitter_.make_label();
+        auto end = emitter_.make_label();
+        loop_continues_.push_back(cont);
+        loop_breaks_.push_back(end);
+        emitter_.bind(start);
+        gen_stmt(*s->body, prefix);
+        emitter_.bind(cont);
+        gen_expr(*s->cond);
+        emitter_.test(rax, rax);
+        emitter_.jnz(start);
+        emitter_.bind(end);
+        loop_continues_.pop_back();
+        loop_breaks_.pop_back();
+    }
+    else if (auto s = dynamic_cast<const BreakStmt*>(&stmt)) {
+        if (!loop_breaks_.empty()) emitter_.jmp(loop_breaks_.back());
+    }
+    else if (auto s = dynamic_cast<const ContinueStmt*>(&stmt)) {
+        if (!loop_continues_.empty()) emitter_.jmp(loop_continues_.back());
     }
     else if (auto s = dynamic_cast<const IfStmt*>(&stmt)) {
         auto else_lbl = emitter_.make_label();
@@ -178,8 +238,74 @@ void Codegen::gen_stmt(const Stmt& stmt, std::string prefix) {
 }
 
 void Codegen::gen_expr(const Expr& expr) {
-    if (auto e = dynamic_cast<const IntExpr*>(&expr)) {
+    if (auto e = dynamic_cast<const MemberExpr*>(&expr)) {
+        if (auto v = dynamic_cast<const VarExpr*>(e->object.get())) {
+             std::string type = var_types_[v->name];
+             if (structs_.count(type)) {
+                  auto& info = structs_[type];
+                  int offset = info.offsets.at(e->member);
+                  emitter_.lea(rax, current_fn_->local_mem(v->name));
+                  emitter_.mov(rax, mce::qword_ptr(rax, offset));
+             }
+        }
+    }
+    else if (auto e = dynamic_cast<const AssignExpr*>(&expr)) {
+        if (auto v = dynamic_cast<const VarExpr*>(e->target.get())) {
+            gen_expr(*e->value);
+            emitter_.mov(current_fn_->local_mem(v->name), rax);
+        } else if (auto m = dynamic_cast<const MemberExpr*>(e->target.get())) {
+            if (auto v = dynamic_cast<const VarExpr*>(m->object.get())) {
+                 std::string type = var_types_[v->name];
+                 if (structs_.count(type)) {
+                      auto& info = structs_[type];
+                      int offset = info.offsets.at(m->member);
+                      gen_expr(*e->value);
+                      emitter_.push(rax); 
+                      emitter_.lea(rax, current_fn_->local_mem(v->name));
+                      emitter_.pop(rcx);
+                      emitter_.mov(mce::qword_ptr(rax, offset), rcx);
+                      emitter_.mov(rax, rcx); 
+                 }
+            }
+        }
+    }
+    else if (auto e = dynamic_cast<const IntExpr*>(&expr)) {
         emitter_.mov(rax, (long long)e->value);
+    }
+    else if (auto e = dynamic_cast<const AssignExpr*>(&expr)) {
+        if (auto v = dynamic_cast<const VarExpr*>(e->target.get())) {
+            gen_expr(*e->value);
+            emitter_.mov(current_fn_->local_mem(v->name), rax);
+        } else if (auto m = dynamic_cast<const MemberExpr*>(e->target.get())) {
+            if (auto v = dynamic_cast<const VarExpr*>(m->object.get())) {
+                 std::string type = var_types_[v->name];
+                 if (structs_.count(type)) {
+                      auto& info = structs_[type];
+                      int offset = info.offsets.at(m->member);
+                      gen_expr(*e->value);
+                      emitter_.push(rax); 
+                      emitter_.lea(rax, current_fn_->local_mem(v->name));
+                      emitter_.pop(rcx);
+                      emitter_.mov(mce::qword_ptr(rax, offset), rcx);
+                      emitter_.mov(rax, rcx); 
+                 }
+            }
+        }
+    }
+    else if (auto e = dynamic_cast<const UnaryExpr*>(&expr)) {
+        if (auto v = dynamic_cast<const VarExpr*>(e->operand.get())) {
+            emitter_.mov(rax, current_fn_->local_mem(v->name));
+            if (e->is_postfix) emitter_.push(rax);
+            
+            if (e->op == TokenType::INC) emitter_.inc(rax);
+            else emitter_.dec(rax);
+            
+            emitter_.mov(current_fn_->local_mem(v->name), rax);
+            if (e->is_postfix) emitter_.pop(rax);
+        } else {
+            ErrorReporter::error(e->line, "lvalue required as increment operand");
+            throw std::runtime_error("semantic error");
+        }
     }
     else if (auto e = dynamic_cast<const VarExpr*>(&expr)) {
         try {
@@ -191,13 +317,41 @@ void Codegen::gen_expr(const Expr& expr) {
             throw std::runtime_error("semantic error");
         }
     }
+    else if (auto e = dynamic_cast<const MemberExpr*>(&expr)) {
+        // This is tricky: needs address of object.
+        // For now, T++ only supports local structs and direct member access.
+        if (auto v = dynamic_cast<const VarExpr*>(e->object.get())) {
+             // Find base address
+             // Actually, we need a way to get the address of a local variable.
+             // mce's local_mem returns Mem operand.
+             // We can use LEA rax, [rbp - offset]
+             // But we don't know the offset easily from LocalVar.
+             // Wait! mce::FunctionBuilder::local_mem returns an mce::Mem.
+             // I'll assume it's basically [RBP - something].
+             
+             // Simple version: load the whole object (if it were small) 
+             // but we want address.
+             // T++ doesn't have "&" operator yet, but "obj.mem" is like *(obj_addr + offset).
+             
+             // Since I can't easily get LEA target from LocalVar without modifying MCE,
+             // I'll implement a simple hack for now (assuming all members are in the same local).
+             // NO, that's wrong.
+             
+             // Actually, MCE's FunctionBuilder::alloc allocates 8 bytes.
+             // For structs, we should allocate total_size.
+             
+             // Let's assume the user is using `int` for members.
+             // I'll skip MemberExpr for now until I can get address calc working,
+             // OR I'll add "lea" support for local vars.
+        }
+    }
     else if (auto e = dynamic_cast<const ScopedVarExpr*>(&expr)) {
         std::string full_name = e->scope + "::" + e->name;
         if (e->scope == "std" && e->name == "cout") {
             if (global_vars_.count(full_name)) {
                 emitter_.mov(rax, (i64)-42); // magic cout id
             } else {
-                ErrorReporter::error(expr.line, "undefined scoped member 'std::cout'. Did you forget '#include <io.h>'?");
+                ErrorReporter::error(expr.line, "undefined scoped member 'std::cout'. Did you forget '#include <iostream>'?");
                 throw std::runtime_error("semantic error");
             }
         }

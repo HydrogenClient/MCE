@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
     };
     
     for (const auto& p : search_paths) {
-        std::ifstream test(p + "\\io.h");
+        std::ifstream test(p + "\\iostream");
         if (test) { inc_path = p; break; }
     }
 

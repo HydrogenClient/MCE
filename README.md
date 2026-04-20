@@ -21,12 +21,13 @@ A powerful, header-only backend for emitting x64 machine code and generating val
 ### 2. [T++ Compiler (Tiny++)](tpp/)
 A lightweight C++11 frontend that demonstrates the power of MCE.
 
-- **C++11 Constructs**: Full support for `auto`, `nullptr`, `constexpr`, `static_assert`, `enum class`, and `using` type aliases.
-- **Modern Syntax**: `decltype(expr)` and trailing return types (e.g., `auto main() -> int`).
+- **C++11 Keywords**: 100% Lexical Parity. Supports all 73 standard C++11 keywords (e.g., `alignas`, `thread_local`, `decltype`, `constexpr`, etc.).
+- **Classes & Structs**: Full support for `struct` and `class` definitions with member layout calculation and dot-operator (`.`) member access.
+- **Modern Control Flow**: Support for `for` (with inline declarations), `while`, and `do-while` loops, including `break` and `continue`.
+- **Unary Operators**: Full support for prefix and postfix increment/decrement (`++`, `--`).
+- **Modern Syntax**: `decltype(expr)`, trailing return types (e.g., `auto main() -> int`), and `sizeof` operator.
 - **Namespaces**: Recursive nested namespaces (`namespace a { namespace b {} }`) and multi-level scoping (`a::b::c`).
-- **Stream I/O**: `std::cout`-style output with `<<` operator chaining.
-- **Literal Support**: Binary literals (`0b1101`), digit separators (`1'000'000`), and basic float-literal parsing (truncated to integer).
-- **Control Flow**: `if`, `else`, `while`, `return`.
+- **Stream I/O**: Native `std::cout` support with `#include <iostream>` (no extension), identical to standard C++. Supports operator `<<` chaining for strings and integers.
 - **Diagnostics**: User-friendly, `g++`-style error reporting with code snippets and "did you mean?" suggestions.
 - **Comments**: Support for `//` single-line and `/* ... */` multi-line comments.
 
@@ -57,9 +58,9 @@ The build process will generate:
 - `build/mce/tests/`: Unit tests for the emitter.
 
 ### Compiling T++ Code
-Create a file named `sample.tpp`:
+Create a file named `sample.cpp`:
 ```cpp
-#include <io.h>
+#include <iostream>
 
 namespace math {
     namespace constants {

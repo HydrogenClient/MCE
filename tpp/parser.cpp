@@ -26,6 +26,22 @@ std::unique_ptr<Decl> Parser::parse_decl() {
         return std::unique_ptr<Decl>(new NamespaceDecl(name, std::move(members)));
     }
     
+    if (match(TokenType::STRUCT)) {
+        std::string name = advance().text;
+        match(TokenType::LBRACE);
+        std::vector<StructDecl::Member> m;
+        while (!check(TokenType::RBRACE) && !is_at_end()) {
+            std::string type = advance().text;
+            std::string member_name = advance().text;
+            match(TokenType::SEMICOLON);
+            m.push_back({type, member_name});
+        }
+        match(TokenType::RBRACE);
+        match(TokenType::SEMICOLON);
+        types_.insert(name);
+        return std::unique_ptr<Decl>(new StructDecl(name, std::move(m)));
+    }
+    
     if (check(TokenType::ENUM) || check(TokenType::USING) || check(TokenType::STATIC_ASSERT)) {
         return std::unique_ptr<Decl>(new StmtDecl(parse_statement()));
     }
@@ -105,27 +121,33 @@ std::unique_ptr<Stmt> Parser::parse_statement() {
     std::unique_ptr<Stmt> res;
 
     bool is_constexpr = match(TokenType::CONSTEXPR);
-    if (is_constexpr || (peek().type == TokenType::IDENTIFIER && types_.count(peek().text)) || check(TokenType::INT) || check(TokenType::AUTO) || check(TokenType::DECLTYPE)) {
+    if (is_constexpr || (peek().type == TokenType::IDENTIFIER && types_.count(peek().text)) || check(TokenType::INT) || check(TokenType::AUTO) || check(TokenType::DECLTYPE) || check(TokenType::LONG)) {
+        std::string type_name = "int";
         if (is_constexpr) {
-             if (types_.count(peek().text)) advance();
+             if (types_.count(peek().text)) type_name = advance().text;
              else if (match(TokenType::DECLTYPE)) {
                   match(TokenType::LPAREN);
                   parse_expression();
                   match(TokenType::RPAREN);
+                  type_name = "decltype";
              }
-             else match(TokenType::INT);
+             else { match(TokenType::INT); type_name = "int"; }
         } else if (match(TokenType::DECLTYPE)) {
              match(TokenType::LPAREN);
              parse_expression();
              match(TokenType::RPAREN);
+             type_name = "decltype";
+        } else if (match(TokenType::LONG)) {
+             type_name = "long";
+             if (match(TokenType::LONG)) type_name = "long long";
         } else {
-             advance();
+             type_name = advance().text;
         }
         std::string name = advance().text;
         std::unique_ptr<Expr> init = nullptr;
         if (match(TokenType::ASSIGN)) init = parse_expression();
         match(TokenType::SEMICOLON);
-        res.reset(new VarDeclStmt(name, std::move(init)));
+        res.reset(new VarDeclStmt(type_name, name, std::move(init)));
     }
     else if (match(TokenType::STATIC_ASSERT)) {
         match(TokenType::LPAREN);
@@ -171,6 +193,58 @@ std::unique_ptr<Stmt> Parser::parse_statement() {
         auto body = parse_statement();
         res.reset(new WhileStmt(std::move(cond), std::move(body)));
     }
+    else if (match(TokenType::FOR)) {
+        match(TokenType::LPAREN);
+        std::unique_ptr<Stmt> init = nullptr;
+        if (!match(TokenType::SEMICOLON)) {
+            init = parse_statement();
+        }
+        std::unique_ptr<Expr> cond = nullptr;
+        if (!match(TokenType::SEMICOLON)) {
+            cond = parse_expression();
+            match(TokenType::SEMICOLON);
+        }
+        std::unique_ptr<Expr> inc = nullptr;
+        if (!match(TokenType::RPAREN)) {
+            inc = parse_expression();
+            match(TokenType::RPAREN);
+        }
+        auto body = parse_statement();
+        res.reset(new ForStmt(std::move(init), std::move(cond), std::move(inc), std::move(body)));
+    }
+    else if (match(TokenType::DO)) {
+        auto body = parse_statement();
+        match(TokenType::WHILE);
+        match(TokenType::LPAREN);
+        auto cond = parse_expression();
+        match(TokenType::RPAREN);
+        match(TokenType::SEMICOLON);
+        res.reset(new DoWhileStmt(std::move(body), std::move(cond)));
+    }
+    else if (match(TokenType::BREAK)) {
+        match(TokenType::SEMICOLON);
+        res.reset(new BreakStmt());
+    }
+    else if (match(TokenType::CONTINUE)) {
+        match(TokenType::SEMICOLON);
+        res.reset(new ContinueStmt());
+    }
+    else if (match(TokenType::SWITCH)) {
+        match(TokenType::LPAREN);
+        auto cond = parse_expression();
+        match(TokenType::RPAREN);
+        auto body = parse_statement();
+        res.reset(new SwitchStmt(std::move(cond), std::move(body)));
+    }
+    else if (match(TokenType::CASE)) {
+        auto val = parse_expression();
+        match(TokenType::COLON);
+        res.reset(new CaseStmt(std::move(val)));
+    }
+    else if (match(TokenType::DEFAULT)) {
+        match(TokenType::COLON);
+        res.reset(new DefaultStmt());
+    }
     else if (match(TokenType::IF)) {
         match(TokenType::LPAREN);
         auto cond = parse_expression();
@@ -185,18 +259,7 @@ std::unique_ptr<Stmt> Parser::parse_statement() {
         match(TokenType::SEMICOLON);
         res.reset(new ReturnStmt(std::move(val)));
     }
-    else if (peek().type == TokenType::IDENTIFIER && tokens_[pos_+1].type == TokenType::ASSIGN) {
-        std::string name = advance().text;
-        advance(); // skip =
-        auto val = parse_expression();
-        match(TokenType::SEMICOLON);
-        res.reset(new AssignStmt(name, std::move(val)));
-    }
     else if (check(TokenType::LBRACE)) return parse_block();
-    else if (peek().type == TokenType::IDENTIFIER && types_.count(peek().text) && tokens_[pos_+1].type == TokenType::IDENTIFIER) {
-        // Handled by the first if block now
-        return parse_statement();
-    }
     else if (peek().type == TokenType::IDENTIFIER && tokens_[pos_+1].type == TokenType::IDENTIFIER) {
         std::string name = peek().text;
         std::vector<std::string> suggestions = {"int", "while", "if", "return", "extern"};
@@ -214,7 +277,16 @@ std::unique_ptr<Stmt> Parser::parse_statement() {
 }
 
 std::unique_ptr<Expr> Parser::parse_expression() {
-    return parse_equality();
+    return parse_assignment();
+}
+
+std::unique_ptr<Expr> Parser::parse_assignment() {
+    auto left = parse_equality();
+    if (match(TokenType::ASSIGN)) {
+        auto right = parse_assignment();
+        return std::unique_ptr<Expr>(new AssignExpr(std::move(left), std::move(right)));
+    }
+    return left;
 }
 
 std::unique_ptr<Expr> Parser::parse_equality() {
@@ -284,6 +356,14 @@ std::unique_ptr<Expr> Parser::parse_factor() {
 
 std::unique_ptr<Expr> Parser::parse_primary() {
     int line = peek().line;
+    if (match(TokenType::INC) || match(TokenType::DEC)) {
+        auto op = tokens_[pos_-1].type;
+        auto operand = parse_primary();
+        auto res = std::unique_ptr<Expr>(new UnaryExpr(op, std::move(operand), false));
+        res->line = line;
+        return res;
+    }
+
     std::unique_ptr<Expr> res;
 
     if (match(TokenType::NUMBER)) {
@@ -294,6 +374,19 @@ std::unique_ptr<Expr> Parser::parse_primary() {
     }
     else if (match(TokenType::NULLPTR_TOKEN)) {
         res.reset(new NullExpr());
+    }
+    else if (match(TokenType::SIZEOF)) {
+        match(TokenType::LPAREN);
+        if (types_.count(peek().text)) advance();
+        else parse_expression();
+        match(TokenType::RPAREN);
+        res.reset(new IntExpr(8)); // placeholder, everything is 8
+    }
+    else if (match(TokenType::TRUE_TOKEN)) {
+        res.reset(new IntExpr(1));
+    }
+    else if (match(TokenType::FALSE_TOKEN)) {
+        res.reset(new IntExpr(0));
     }
     else if (match(TokenType::IDENTIFIER)) {
         std::string full_name = tokens_[pos_-1].text;
@@ -332,8 +425,21 @@ std::unique_ptr<Expr> Parser::parse_primary() {
         ErrorReporter::error(peek().line, "unexpected token '" + peek().text + "'", peek().text, suggestions);
         throw std::runtime_error("syntax error");
     }
-
+    
     if (res) res->line = line;
+    
+    if (match(TokenType::INC) || match(TokenType::DEC)) {
+        res.reset(new UnaryExpr(tokens_[pos_-1].type, std::move(res), true));
+        res->line = line;
+    }
+    
+    // Member access: object.member
+    while (match(TokenType::DOT)) {
+        std::string member = advance().text;
+        res.reset(new MemberExpr(std::move(res), member));
+        res->line = line;
+    }
+
     return res;
 }
 
