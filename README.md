@@ -44,7 +44,7 @@ A lightweight C++11 frontend that demonstrates the power of MCE.
 
 ```powershell
 # Clone the repository
-git clone https://github.com/HydrogenClient/MCE.git
+git clone https://github.com/9cle/MCE.git
 cd MCE
 
 # Configure and Build

@@ -44,7 +44,8 @@ int main(int argc, char** argv) {
     
     // Check common locations
     std::vector<std::string> search_paths = {
-        exe_dir + "\\includes",               // next to exe
+        exe_dir + "\\..\\includes",            // normal installation path
+        exe_dir + "\\includes",                // next to exe
         exe_dir + "\\..\\..\\tpp\\includes",   // from build/tpp
         "tpp/includes",                        // from root
         "..\\tpp\\includes"                    // from build
